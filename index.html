@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>清算模拟器 (多进程版)</title>
+    <style>
+        /* ... (CSS 样式 保持不变) ... */
+        body {
+            font-family: sans-serif;
+            margin: 2em;
+            background: #f9f9f9;
+        }
+
+        #app {
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2em;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.05);
+        }
+
+        h1 {
+            color: #333;
+        }
+
+        .controls {
+            margin-bottom: 1.5em;
+            display: flex;
+            gap: 1em;
+            align-items: flex-end;
+        }
+
+        .controls div {
+            flex: 1;
+        }
+
+        label {
+            display: block;
+            margin-bottom: 0.5em;
+            font-weight: 600;
+        }
+
+        input[type="number"],
+        input[type="text"] {
+            width: 100%;
+            padding: 0.5em;
+            border-radius: 4px;
+            border: 1px solid #ccc;
+            box-sizing: border-box;
+        }
+
+        button {
+            background: #007bff;
+            color: white;
+            padding: 0.75em 1.5em;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+            font-size: 1em;
+        }
+
+        button:hover {
+            background: #0056b3;
+        }
+
+        /* 【新增】按钮禁用时的样式 */
+        button:disabled {
+            background: #aaa;
+            cursor: not-allowed;
+        }
+
+        #progress-bar {
+            width: 100%;
+            background: #e9ecef;
+            border-radius: 4px;
+            overflow: hidden;
+            height: 2em;
+            margin-top: 0.5em;
+        }
+
+        #progress-fill {
+            width: 0%;
+            height: 100%;
+            background: #28a745;
+            transition: width 0.1s ease;
+        }
+
+        #progress-text {
+            text-align: center;
+            margin-top: 0.5em;
+            font-weight: 600;
+            font-size: 1.2em;
+        }
+
+        #worker-monitor {
+            margin-top: 2em;
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+            gap: 1em;
+        }
+
+        .worker-box {
+            background: #f0f0f0;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            padding: 1em;
+            text-align: center;
+            transition: background 0.1s ease;
+        }
+
+        .worker-box .id {
+            font-weight: bold;
+            font-size: 1.2em;
+            color: #333;
+        }
+
+        .worker-box .count {
+            font-size: 1.5em;
+            color: #007bff;
+            margin-top: 0.5em;
+        }
+
+        .worker-box.active {
+            background: #cce5ff;
+            border-color: #007bff;
+        }
+    </style>
+    <script src="https://cdn.socket.io/4.7.5/socket.io.min.js"></script>
+</head>
+
+<body>
+    <div id="app">
+        <h1>高可靠性批量清算模拟器</h1>
+        <div class="controls">
+            <div>
+                <label for="accounts-count">账户数量:</label>
+                <input type="number" id="accounts-count" value="3000">
+            </div>
+            <div>
+                <label for="user-id">用户ID:</label>
+                <input type="text" id="user-id" value="user-test-123">
+            </div>
+            <button id="start-button" disabled>正在连接...</button>
+        </div>
+
+        <div class="status">
+            <h2>实时总进度</h2>
+            <div id="progress-bar">
+                <div id="progress-fill"></div>
+            </div>
+            <div id="progress-text">正在连接到服务器...</div>
+
+            <h2 style="margin-top: 1.5em;">Worker 实时监控 (共 <span id="worker-count">0</span> 个)</h2>
+            <div id="worker-monitor">
+            </div>
+        </div>
+    </div>
+
+    <script>
+        const progressFill = document.getElementById('progress-fill');
+        const progressText = document.getElementById('progress-text');
+        const monitor = document.getElementById('worker-monitor');
+        const workerCountEl = document.getElementById('worker-count');
+        const startButton = document.getElementById('start-button'); // <-- 获取按钮
+
+        const socket = io("http://localhost:3001");
+
+        const workerStats = new Map();
+        let currentJobId = null;
+
+        socket.on("connect", () => {
+            console.log("已成功连接到 WebSocket 服务器!");
+            // 【关键修复】连接成功！
+            startButton.disabled = false; // 1. 启用按钮
+            startButton.textContent = "开始清算"; // 2. 恢复按钮文本
+            progressText.textContent = "连接成功！等待作业启动..."; // 3. 更新状态文本
+        });
+
+        socket.on("disconnect", () => {
+            console.log("已与 WebSocket 断开连接。");
+            // 【关键修复】断开连接！
+            startButton.disabled = true; // 1. 禁用按钮
+            startButton.textContent = "已断开"; // 2. 更改按钮文本
+            progressText.textContent = "连接已断开。请刷新页面。"; // 3. 更新状态文本
+        });
+
+        // (handleProgressUpdate 函数保持不变)
+        function handleProgressUpdate(payload) {
+            // ... (代码 100% 不变) ...
+            const { processed, total, workerId } = payload;
+            const percentage = (processed / total) * 100;
+            progressFill.style.width = percentage + '%';
+            progressText.textContent = `处理中: ${processed} / ${total}`;
+            if (!workerStats.has(workerId)) {
+                const box = document.createElement('div');
+                box.className = 'worker-box';
+                box.innerHTML = `<div class="id">Worker #${workerId}</div><div class="count">0</div>`;
+                monitor.appendChild(box);
+                workerStats.set(workerId, { element: box, count: 0 });
+                workerCountEl.textContent = workerStats.size;
+            }
+            const worker = workerStats.get(workerId);
+            worker.count++;
+            worker.element.querySelector('.count').textContent = worker.count;
+            worker.element.classList.add('active');
+            setTimeout(() => {
+                if (worker.element) {
+                    worker.element.classList.remove('active');
+                }
+            }, 100);
+            if (processed === total) {
+                progressText.textContent = `作业完成: ${processed} / ${total}!`;
+                progressFill.style.background = "#007bff";
+            }
+        }
+
+        // (API 调用 函数保持不变)
+        startButton.addEventListener('click', async () => {
+            const accountsCount = parseInt(document.getElementById('accounts-count').value);
+            const userId = document.getElementById('user-id').value;
+
+            // ... (重置界面 的代码不变) ...
+            monitor.innerHTML = '';
+            workerStats.clear();
+            workerCountEl.textContent = 0;
+            progressFill.style.width = '0%';
+            progressFill.style.background = "#28a745";
+            progressText.textContent = `已启动: 0 / ${accountsCount}`;
+            if (currentJobId) {
+                socket.off(`job-progress:${currentJobId}`);
+            }
+
+            try {
+                // ... (fetch API 的代码不变) ...
+                const response = await fetch("http://localhost:3001/liquidation/job", {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        accounts_count: accountsCount,
+                        user_id: userId
+                    })
+                });
+                const data = await response.json();
+                if (!response.ok) throw new Error(data.message || 'API 请求失败');
+
+                currentJobId = data.jobId;
+                console.log(`正在监听 Redis 频道: job-progress:${currentJobId}`);
+
+                // ... (监听 WebSocket 的代码不变) ...
+                socket.on(`job-progress:${currentJobId}`, handleProgressUpdate);
+
+            } catch (error) {
+                progressText.textContent = `启动失败: ${error.message}`;
+            }
+        });
+    </script>
+</body>
+
+</html>
