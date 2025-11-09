@@ -6,6 +6,7 @@ export enum JobStatus {
     PROCESSING = 'processing',
     COMPLETED = 'completed',
     FAILED = 'failed',
+    CANCELLED = 'cancelled',
 }
 
 @Entity('job_log')
@@ -30,7 +31,7 @@ export class JobLog {
     @Column({ default: 0 })
     processed_accounts: number;
 
-    @Column({ type: 'timestamp', default: () => 'CURRENT_TIMESTAMP' })
+    @Column({ type: 'timestamp' })
     start_time: Date;
 
     @Column({ type: 'timestamp', nullable: true })

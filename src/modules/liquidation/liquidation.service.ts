@@ -96,9 +96,24 @@ export class LiquidationService {
     async handleTaskProcessing(@Payload() message: { taskId: string; jobId: string; accountId: string }) {
         const { taskId, jobId } = message;
         const workerId = process.env.pm_id || '0';
-        this.logger.log(`[清算Worker] 开始处理 Task ${taskId} (Job: ${jobId})`);
 
         try {
+            const initialJob = await this.jobLogRepository.findOne({
+                where: { job_id: jobId },
+                select: ['status'], // 优化：我们只关心状态
+            });
+            if (!initialJob) {
+                this.logger.error(`[清算Worker]停止执行: 找不到 Job ${jobId} 来更新进度。`);
+                return;
+            }
+
+            if (initialJob.status === JobStatus.CANCELLED) {
+                this.logger.log(`[清算Worker ${workerId}] 忽略 Task ${taskId}，因为 Job ${jobId} 已被取消。`);
+                return;
+            }
+
+            this.logger.log(`[清算Worker ${workerId}] 开始处理 Task ${taskId} (Job: ${jobId})`);
+
             // 1. 模拟延迟
             await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
 
@@ -113,42 +128,66 @@ export class LiquidationService {
                 1,
             );
 
-            // **【已修复 坑#3】**: 移除了有 Bug 的“完成检查”逻辑。
-            // 检查Job是否完成的逻辑不应该放在这里，
-            const job = await this.jobLogRepository.findOneBy({ job_id: jobId });
-            if (!job) {
-                this.logger.error(`[清算Worker]停止执行: 找不到 Job ${jobId} 来更新进度。`);
+            const updatedJob = await this.jobLogRepository.findOneBy({ job_id: jobId });
+            if (!updatedJob) {
+                // 理论上不会发生，但还是检查一下
+                this.logger.error(`[清算Worker ${workerId}] 致命错误: 找不到 Job ${jobId} 来更新进度。`);
                 return;
             }
-            const processedCount = job.processed_accounts;
-            const totalCount = job.total_accounts;
-            /*if (processedCount >= totalCount) {
-                this.logger.log(`[清算Worker] Job ${jobId} 已超过总数，退出任务!`);
-                return;
-            }*/
+            const processedCount = updatedJob.processed_accounts;
+            const totalCount = updatedJob.total_accounts;
 
             this.logger.log(`[清算Worker ${workerId}] Task ${taskId} 处理完毕, Job ${jobId} 计数器 +1`);
 
+            let durationInMs: number | null = null;
+
             // 加入 Redis 广播逻辑
             const channel = `job-progress:${jobId}`;
+
+            if (processedCount === totalCount) {
+                this.logger.log(`[清算Worker] Job ${jobId} 已全部完成!`);
+                const endTime = new Date();
+                durationInMs = endTime.getTime() - new Date(updatedJob.start_time).getTime();
+                await this.jobLogRepository.update(
+                    { job_id: jobId },
+                    {
+                        status: JobStatus.COMPLETED,
+                        end_time: endTime,
+                        total_duration_ms: durationInMs
+                    }
+                );
+            }
+
             const payload = JSON.stringify({
                 jobId: jobId,
                 processed: processedCount,
                 total: totalCount,
                 workerId: workerId,
+                duration: durationInMs,
             });
             await this.redisClient.publish(channel, payload);
-            this.logger.log(`[清算Worker] 已将进度广播到 Redis 频道: ${channel}`);
-
-            if (processedCount === totalCount) {
-                this.logger.log(`[清算Worker] Job ${jobId} 已全部完成!`);
-                await this.jobLogRepository.update({ job_id: jobId }, { status: JobStatus.COMPLETED });
-            }
+            this.logger.log(`[清算Worker ${workerId}] 已将进度广播到 Redis 频道: ${channel}`);
 
         } catch (error) {
-            this.logger.error(`[清算Worker] 处理 Task ${taskId} 失败:`, error);
+            this.logger.error(`[清算Worker ${workerId}] 处理 Task ${taskId} 失败:`, error);
             await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.FAILED });
             await this.jobLogRepository.update({ job_id: jobId }, { status: JobStatus.FAILED }); // 或 partial_failed
+        }
+    }
+
+    @MessagePattern('job-cancel-topic')
+    async handleJobCancellation(@Payload() message: { jobId: string }) {
+        const { jobId } = message;
+        this.logger.warn(`[僵尸修复] 收到 Job ${jobId} 的“取消”请求。`);
+
+        try {
+            await this.jobLogRepository.update(
+                { job_id: jobId },
+                { status: JobStatus.CANCELLED } // <-- 更新数据库状态
+            );
+            this.logger.warn(`[僵尸修复] Job ${jobId} 状态已更新为 CANCELLED。`);
+        } catch (error) {
+            this.logger.error(`[僵尸修复] 更新 Job ${jobId} 状态失败:`, error);
         }
     }
 }

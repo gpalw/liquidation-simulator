@@ -43,12 +43,14 @@ export class LiquidationController implements OnModuleDestroy, OnModuleInit {
             `[API] 接收到创建作业请求: ${JSON.stringify(createJobDto)}`,
         );
 
+        const startTime = new Date();
         // 1. 在 Job_Log 表中创建一条新记录
         const newJob = this.jobLogRepository.create({
             user_id: createJobDto.user_id,
             total_accounts: createJobDto.accounts_count,
             processed_accounts: 0,
             status: JobStatus.PENDING, // 使用枚举
+            start_time: startTime,
         });
         await this.jobLogRepository.save(newJob);
 

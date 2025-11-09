@@ -7,6 +7,9 @@ import { LiquidationModule } from './modules/liquidation/liquidation.module';
 import { JobLog } from './modules/liquidation/entities/job-log.entity';
 import { TaskLog } from './modules/liquidation/entities/task-log.entity';
 import { RedisModule } from './modules/redis/redis.module';
+import { AuthModule } from './modules/auth/auth.module';
+import { ServeStaticModule } from '@nestjs/serve-static';
+import { join } from 'path';
 
 @Module({
   imports: [
@@ -14,6 +17,10 @@ import { RedisModule } from './modules/redis/redis.module';
     ConfigModule.forRoot({
       isGlobal: true, // 让配置在全局可用
       envFilePath: '.env',
+    }),
+
+    ServeStaticModule.forRoot({
+      rootPath: join(__dirname, '..', 'public'),
     }),
 
     // 2. 配置 TypeORM (数据库连接)
@@ -31,6 +38,7 @@ import { RedisModule } from './modules/redis/redis.module';
     // 3. 导入你的新模块
     LiquidationModule,
     RedisModule,
+    AuthModule,
 
     // ... (我们稍后会在这里添加 Kafka 和 WebSocket 模块)
   ],
