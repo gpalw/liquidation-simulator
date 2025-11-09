@@ -1,6 +1,6 @@
 // src/modules/liquidation/liquidation.service.ts
 
-import { Injectable, Logger, Inject, Controller } from '@nestjs/common';
+import { Injectable, Logger, Inject, Controller, OnModuleInit, OnModuleDestroy } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, EntityManager } from 'typeorm';
 import { ClientKafka, MessagePattern, Payload } from '@nestjs/microservices';
@@ -9,11 +9,18 @@ import { TaskLog, TaskStatus } from './entities/task-log.entity';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 
+type TaskMessage = { taskId: string; jobId: string; accountId: string };
+
 @Controller()
 @Injectable()
 export class LiquidationService {
     [x: string]: any;
     private readonly logger = new Logger(LiquidationService.name);
+
+    private readonly CONCURRENCY_LIMIT = 10;
+    private taskQueue: TaskMessage[] = [];
+    private activeTasksCount = 0;
+    private taskInterval: NodeJS.Timeout;
 
     constructor(
         @Inject('KAFKA_SERVICE')
@@ -30,6 +37,17 @@ export class LiquidationService {
 
         @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
     ) { }
+
+    onModuleInit() {
+        this.logger.log('[并发引擎] 启动任务处理循环...');
+        // 每 100 毫秒“唤醒”一次，去检查队列
+        this.taskInterval = setInterval(() => this._processTaskQueue(), 100);
+    }
+
+    onModuleDestroy() {
+        this.logger.log('[并发引擎] 停止任务处理循环。');
+        clearInterval(this.taskInterval);
+    }
 
     /**
      * 任务2：创建“总管Worker”
@@ -94,58 +112,94 @@ export class LiquidationService {
      */
     @MessagePattern('tasks-topic')
     async handleTaskProcessing(@Payload() message: { taskId: string; jobId: string; accountId: string }) {
-        const { taskId, jobId } = message;
+        this.taskQueue.push(message);
+        this.logger.log(`[收件箱] 收到 Task ${message.taskId}，已推入队列 (当前队列: ${this.taskQueue.length})`);
+    }
+
+    private _processTaskQueue() {
+        // 这个函数由 setInterval 每 100ms 触发一次
+
+        // 当我们“有空闲额度” 并且“队列里有活儿”时
+        while (this.activeTasksCount < this.CONCURRENCY_LIMIT && this.taskQueue.length > 0) {
+
+            // 1. 从队列里拿一个任务
+            const taskMessage = this.taskQueue.shift(); // .shift() 从数组头部取出
+            if (!taskMessage) {
+                // 理论上因为 while 循环 的检查，这里永远不会执行，但这能让 TS 满意
+                continue;
+            }
+            // 2. 占用一个“并发额度”
+            this.activeTasksCount++;
+
+            this.logger.log(`[并发引擎] 开始处理 Task ${taskMessage.taskId}。(并发: ${this.activeTasksCount}/${this.CONCURRENCY_LIMIT})`);
+
+            // 3. “开火，然后忘掉” (Fire-and-forget)
+            //    我们 *不* `await` 它，这样 `while` 循环才能继续
+            //    去启动下一个（直到额度用完）
+            this._processSingleTask(taskMessage)
+                .catch(err => {
+                    // 确保单个任务的崩溃不会弄崩整个引擎
+                    this.logger.error(`[并发引擎] Task ${taskMessage.taskId} 处理失败 (未捕获):`, err);
+                })
+                .finally(() => {
+                    // 4. 无论成功还是失败，*必须* 释放“并发额度”
+                    this.activeTasksCount--;
+                    this.logger.log(`[并发引擎] Task ${taskMessage.taskId} 已完成。(并发: ${this.activeTasksCount}/${this.CONCURRENCY_LIMIT})`);
+                });
+        }
+    }
+
+    private async _processSingleTask(message: TaskMessage) {
+        // 这里的代码，就是我们 *之前* 的 handleTaskProcessing 函数
+        const { taskId, jobId, accountId } = message;
         const workerId = process.env.pm_id || '0';
 
         try {
+            // 1. 【"僵尸"检查】
             const initialJob = await this.jobLogRepository.findOne({
                 where: { job_id: jobId },
-                select: ['status'], // 优化：我们只关心状态
+                select: ['status', 'start_time', 'total_accounts'], //
             });
+
             if (!initialJob) {
-                this.logger.error(`[清算Worker]停止执行: 找不到 Job ${jobId} 来更新进度。`);
+                this.logger.error(`[清算Worker ${workerId}] 致命错误: 找不到 Job ${jobId}。`);
                 return;
             }
-
             if (initialJob.status === JobStatus.CANCELLED) {
                 this.logger.log(`[清算Worker ${workerId}] 忽略 Task ${taskId}，因为 Job ${jobId} 已被取消。`);
                 return;
             }
 
-            this.logger.log(`[清算Worker ${workerId}] 开始处理 Task ${taskId} (Job: ${jobId})`);
-
-            // 1. 模拟延迟
+            // 2. 模拟延迟
             await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
 
-            // 2. 更新 Task_Log 状态为 success
+            // 3. 更新 Task_Log 状态
             await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.SUCCESS });
-            this.logger.log(`[清算Worker] Task ${taskId} 状态更新为 success`);
 
-            // 3. (关键) 原子地更新 Job_Log 表中的 processed_accounts 计数器
+            // 4. (关键) 原子地更新 Job_Log 计数器
             await this.jobLogRepository.increment(
                 { job_id: jobId },
                 'processed_accounts',
                 1,
             );
 
+            // 5. 【修复"后退"Bug】
+            // 我们必须 *重新查询* 数据库，以获取 100% 准确的计数值
             const updatedJob = await this.jobLogRepository.findOneBy({ job_id: jobId });
             if (!updatedJob) {
-                // 理论上不会发生，但还是检查一下
                 this.logger.error(`[清算Worker ${workerId}] 致命错误: 找不到 Job ${jobId} 来更新进度。`);
                 return;
             }
+
             const processedCount = updatedJob.processed_accounts;
             const totalCount = updatedJob.total_accounts;
 
-            this.logger.log(`[清算Worker ${workerId}] Task ${taskId} 处理完毕, Job ${jobId} 计数器 +1`);
+            this.logger.log(`[清算Worker ${workerId}] Task ${taskId} 处理完毕, Job ${jobId} 进度: ${processedCount}/${totalCount}`);
 
             let durationInMs: number | null = null;
 
-            // 加入 Redis 广播逻辑
-            const channel = `job-progress:${jobId}`;
-
+            // 6. 检查是否全部完成
             if (processedCount === totalCount) {
-                this.logger.log(`[清算Worker] Job ${jobId} 已全部完成!`);
                 const endTime = new Date();
                 durationInMs = endTime.getTime() - new Date(updatedJob.start_time).getTime();
                 await this.jobLogRepository.update(
@@ -158,22 +212,25 @@ export class LiquidationService {
                 );
             }
 
+            // 7. 【发布到 Redis】
+            const channel = `job-progress:${jobId}`;
             const payload = JSON.stringify({
                 jobId: jobId,
                 processed: processedCount,
                 total: totalCount,
                 workerId: workerId,
-                duration: durationInMs,
+                duration: durationInMs
             });
             await this.redisClient.publish(channel, payload);
-            this.logger.log(`[清算Worker ${workerId}] 已将进度广播到 Redis 频道: ${channel}`);
 
         } catch (error) {
             this.logger.error(`[清算Worker ${workerId}] 处理 Task ${taskId} 失败:`, error);
             await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.FAILED });
-            await this.jobLogRepository.update({ job_id: jobId }, { status: JobStatus.FAILED }); // 或 partial_failed
+            await this.jobLogRepository.update({ job_id: jobId }, { status: JobStatus.FAILED });
         }
     }
+
+
 
     @MessagePattern('job-cancel-topic')
     async handleJobCancellation(@Payload() message: { jobId: string }) {

@@ -33,6 +33,9 @@ import { join } from 'path';
       database: process.env.DB_DATABASE,
       entities: [JobLog, TaskLog],
       synchronize: true,
+      extra: {
+        max: 5
+      }
     }),
 
     // 3. 导入你的新模块
