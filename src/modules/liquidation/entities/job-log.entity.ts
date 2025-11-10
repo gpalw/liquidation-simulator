@@ -31,6 +31,9 @@ export class JobLog {
     @Column({ default: 0 })
     processed_accounts: number;
 
+    @Column({ default: 0 })
+    failed_accounts: number;
+
     @Column({ type: 'timestamp' })
     start_time: Date;
 

@@ -10,6 +10,7 @@ import { JobLog, JobStatus } from './entities/job-log.entity';
 class CreateJobDto {
     accounts_count: number;
     user_id: string;
+    error_rate: number;
 }
 
 @Controller('liquidation')
@@ -49,6 +50,7 @@ export class LiquidationController implements OnModuleDestroy, OnModuleInit {
             user_id: createJobDto.user_id,
             total_accounts: createJobDto.accounts_count,
             processed_accounts: 0,
+            failed_accounts: 0,
             status: JobStatus.PENDING, // 使用枚举
             start_time: startTime,
         });
@@ -60,6 +62,7 @@ export class LiquidationController implements OnModuleDestroy, OnModuleInit {
         this.kafkaClient.emit('jobs-topic', {
             jobId: newJob.job_id,
             accountsCount: createJobDto.accounts_count,
+            errorRate: createJobDto.error_rate,
         });
 
         return {

@@ -24,8 +24,24 @@
             <div class="controls">
                 <div>
                     <label for="accounts-count">账户数量:</label>
-                    <input type="number" id="accounts-count" value="3000">
+                    <input type="number" id="accounts-count" value="3000" max="20000">
                 </div>
+
+                <div class="form-row">
+                    <div class="label-with-tip">
+                        <label for="error-rate">模拟错误率 (%):</label>
+                        <span class="tooltip-container">
+                            <span class="tooltip-icon">?</span>
+                            <div class="tooltip-text">
+                                这是每个任务<b>单次</b>执行的失败率。系统最多重试 3 次，
+                                最终失败率 ≈ (错误率)^3。例：20% → 0.2^3=0.8%, 80% → 0.8^3=51.2%
+                            </div>
+                        </span>
+                    </div>
+
+                    <input type="number" id="error-rate" value="0" min="0" max="100">
+                </div>
+
                 <div>
                     <label for="user-id">用户ID (已认证):</label>
                     <input type="text" id="user-id" value="loading..." disabled>
@@ -40,6 +56,7 @@
                 <h2>实时总进度</h2>
                 <div id="progress-bar">
                     <div id="progress-fill"></div>
+                    <div id="progress-fail"></div>
                 </div>
                 <div id="progress-text">正在连接到服务器...</div>
 

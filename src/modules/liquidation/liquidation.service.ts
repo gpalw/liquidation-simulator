@@ -9,7 +9,7 @@ import { TaskLog, TaskStatus } from './entities/task-log.entity';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
 
-type TaskMessage = { taskId: string; jobId: string; accountId: string };
+type TaskMessage = { taskId: string; jobId: string; accountId: string, errorRate?: number };
 
 @Controller()
 @Injectable()
@@ -36,7 +36,8 @@ export class LiquidationService {
         private readonly entityManager: EntityManager,
 
         @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
-    ) { }
+    ) {
+    }
 
     onModuleInit() {
         this.logger.log('[并发引擎] 启动任务处理循环...');
@@ -54,10 +55,10 @@ export class LiquidationService {
      * 监听 'jobs-topic'，并将作业拆分为N个子任务
      */
     @MessagePattern('jobs-topic')
-    async handleJobCreation(@Payload() message: { jobId: string; accountsCount: number }) {
-        const { jobId, accountsCount } = message;
+    async handleJobCreation(@Payload() message: { jobId: string; accountsCount: number; errorRate: number; }) {
+        const { jobId, accountsCount, errorRate } = message;
         this.logger.log(
-            `[总管Worker] 收到 Job ${jobId}, 需处理 ${accountsCount} 个账户`,
+            `[总管Worker] 收到 Job ${jobId}, 账户: ${accountsCount}, 错误率: ${errorRate}%`,
         );
 
         try {
@@ -90,6 +91,7 @@ export class LiquidationService {
                     taskId: task.task_id,
                     jobId: task.job_id,
                     accountId: task.account_id,
+                    errorRate: errorRate,
                 });
             }
 
@@ -150,10 +152,10 @@ export class LiquidationService {
     }
 
     private async _processSingleTask(message: TaskMessage) {
-        // 这里的代码，就是我们 *之前* 的 handleTaskProcessing 函数
-        const { taskId, jobId, accountId } = message;
-        const workerId = process.env.pm_id || '0';
 
+        const { taskId, jobId, accountId, errorRate } = message;
+        const workerId = process.env.pm_id || '0';
+        let retry_count: number = 0;
         try {
             // 1. 【"僵尸"检查】
             const initialJob = await this.jobLogRepository.findOne({
@@ -170,8 +172,21 @@ export class LiquidationService {
                 return;
             }
 
+            const task = await this.taskLogRepository.findOneBy({ task_id: taskId });
+            if (!task) {
+                this.logger.error(`[清算Worker ${workerId}] 致命错误: 找不到 Task ${taskId}`);
+                return;
+            }
+            retry_count = task.retry_count;
+
             // 2. 模拟延迟
             await new Promise(res => setTimeout(res, 500 + Math.random() * 1000));
+
+            // 模拟随机失败
+            if (errorRate && Math.random() < (errorRate / 100)) {
+                this.logger.warn(`[清算Worker ${workerId}] Task ${taskId} 触发了“模拟随机失败”！`);
+                throw new Error('模拟的随机网络错误');
+            }
 
             // 3. 更新 Task_Log 状态
             await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.SUCCESS });
@@ -183,9 +198,11 @@ export class LiquidationService {
                 1,
             );
 
-            // 5. 【修复"后退"Bug】
-            // 我们必须 *重新查询* 数据库，以获取 100% 准确的计数值
-            const updatedJob = await this.jobLogRepository.findOneBy({ job_id: jobId });
+            // 重新查询最新计数
+            const updatedJob = await this.jobLogRepository.findOne({
+                where: { job_id: jobId },
+                select: ['processed_accounts', 'failed_accounts', 'total_accounts', 'start_time'],
+            });
             if (!updatedJob) {
                 this.logger.error(`[清算Worker ${workerId}] 致命错误: 找不到 Job ${jobId} 来更新进度。`);
                 return;
@@ -193,13 +210,16 @@ export class LiquidationService {
 
             const processedCount = updatedJob.processed_accounts;
             const totalCount = updatedJob.total_accounts;
+            const failedCount = updatedJob.failed_accounts;
 
-            this.logger.log(`[清算Worker ${workerId}] Task ${taskId} 处理完毕, Job ${jobId} 进度: ${processedCount}/${totalCount}`);
+            this.logger.log(
+                `[清算Worker ${workerId}] Task ${taskId} 成功, 进度: ${processedCount}+${failedCount}/${totalCount}`,
+            );
 
             let durationInMs: number | null = null;
 
             // 6. 检查是否全部完成
-            if (processedCount === totalCount) {
+            if (processedCount + failedCount === totalCount) {
                 const endTime = new Date();
                 durationInMs = endTime.getTime() - new Date(updatedJob.start_time).getTime();
                 await this.jobLogRepository.update(
@@ -213,20 +233,54 @@ export class LiquidationService {
             }
 
             // 7. 【发布到 Redis】
-            const channel = `job-progress:${jobId}`;
-            const payload = JSON.stringify({
-                jobId: jobId,
-                processed: processedCount,
-                total: totalCount,
-                workerId: workerId,
-                duration: durationInMs
-            });
-            await this.redisClient.publish(channel, payload);
+            await this._publishProgress(jobId, workerId, durationInMs);
 
         } catch (error) {
             this.logger.error(`[清算Worker ${workerId}] 处理 Task ${taskId} 失败:`, error);
-            await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.FAILED });
-            await this.jobLogRepository.update({ job_id: jobId }, { status: JobStatus.FAILED });
+            const MAX_RETRIES = 3;
+            if (retry_count < MAX_RETRIES) {
+                // 9a. 增加重试次数
+                await this.taskLogRepository.increment({ task_id: taskId }, 'retry_count', 1);
+                this.logger.log(`[清算Worker ${workerId}] Task ${taskId} 将在第 ${retry_count + 1} 次重试...`);
+
+                // 9b. 把它重新扔回队列
+                // (我们可以加一点延迟，比如 1 秒后再重试)
+                setTimeout(() => {
+                    this.kafkaClient.emit('tasks-topic', message);
+                }, 1000);
+
+            } else {
+                // 9c. 已达最大重试次数，彻底失败
+                this.logger.error(`[清算Worker ${workerId}] Task ${taskId} 已达最大重试次数 (${MAX_RETRIES})，标记为 FAILED。`);
+
+                // 更新 Task 状态
+                await this.taskLogRepository.update({ task_id: taskId }, { status: TaskStatus.FAILED });
+
+                // (关键) 原子地更新 Job 的“失败”计数器
+                await this.jobLogRepository.increment(
+                    { job_id: jobId },
+                    'failed_accounts',
+                    1
+                );
+
+                const jobNow = await this.jobLogRepository.findOne({
+                    where: { job_id: jobId },
+                    select: ['processed_accounts', 'failed_accounts', 'total_accounts', 'start_time'],
+                });
+                if (jobNow) {
+                    let durationInMs: number | null = null;
+                    if (jobNow.processed_accounts + jobNow.failed_accounts === jobNow.total_accounts) {
+                        const endTime = new Date();
+                        durationInMs = endTime.getTime() - new Date(jobNow.start_time).getTime();
+                        await this.jobLogRepository.update(
+                            { job_id: jobId },
+                            { status: JobStatus.COMPLETED, end_time: endTime, total_duration_ms: durationInMs },
+                        );
+                    }
+                    // ✅ 关键：发布包含 failed 的进度
+                    await this._publishProgress(jobId, workerId, durationInMs);
+                }
+            }
         }
     }
 
@@ -247,4 +301,27 @@ export class LiquidationService {
             this.logger.error(`[僵尸修复] 更新 Job ${jobId} 状态失败:`, error);
         }
     }
+
+    // 1) 统一的进度发布函数
+    private async _publishProgress(jobId: string, workerId: string, durationInMs: number | null = null) {
+        const job = await this.jobLogRepository.findOne({
+            where: { job_id: jobId },
+            select: ['processed_accounts', 'failed_accounts', 'total_accounts', 'start_time', 'status'],
+        });
+        if (!job) return;
+
+        const channel = `job-progress:${jobId}`;
+        const payload = JSON.stringify({
+            jobId,
+            processed: job.processed_accounts,
+            failed: job.failed_accounts,
+            total: job.total_accounts,
+            workerId,
+            duration: durationInMs,
+            status: job.status,
+        });
+        await this.redisClient.publish(channel, payload);
+    }
+
 }
+

@@ -6,11 +6,13 @@ const mainApp = document.getElementById('main-app');
 const googleLoginButton = document.getElementById('google-login-btn');
 
 const progressFill = document.getElementById('progress-fill');
+const progressFail = document.getElementById('progress-fail');
 const progressText = document.getElementById('progress-text');
 const monitor = document.getElementById('worker-monitor');
 const workerCountEl = document.getElementById('worker-count');
 const startButton = document.getElementById('start-button');
 const userIdInput = document.getElementById('user-id');
+const errorRateInput = document.getElementById('error-rate');
 
 // 你的 Nest.js WebSocket 运行在 3001 端口
 const socket = io("http://localhost:3001");
@@ -78,45 +80,59 @@ window.addEventListener("message", (event) => {
 
 // (处理进度更新)
 function handleProgressUpdate(payload) {
-    const { processed, total, workerId, duration } = payload;
-    const percentage = (processed / total) * 100;
-    progressFill.style.width = percentage + '%';
-    progressText.textContent = `处理中: ${processed} / ${total}`;
+    const { processed, failed = 0, total, workerId, duration } = payload;
+
+    const successPercentage = (processed / total) * 100;
+    const failPercentage = (failed / total) * 100;
+
+    progressFill.style.width = successPercentage + '%';
+    progressFail.style.width = failPercentage + '%';
+
+    progressText.innerHTML = `
+        处理中: ${processed} / ${total}
+        <span class="failed-text">(失败: ${failed})</span>
+    `;
 
     // 更新 Worker 监控器 (自动发现)
-    if (!workerStats.has(workerId)) {
-        const box = document.createElement('div');
-        box.className = 'worker-box';
-        box.innerHTML = `<div class="id">Worker #${workerId}</div><div class="count">0</div>`;
-        monitor.appendChild(box);
-        workerStats.set(workerId, { element: box, count: 0 });
-        workerCountEl.textContent = workerStats.size;
-    }
-    const worker = workerStats.get(workerId);
-    worker.count++;
-    worker.element.querySelector('.count').textContent = worker.count;
-
-    // "闪烁"
-    worker.element.classList.add('active');
-    setTimeout(() => {
-        if (worker.element) {
-            worker.element.classList.remove('active');
+    if (workerId !== undefined) {
+        if (!workerStats.has(workerId)) {
+            const box = document.createElement('div');
+            box.className = 'worker-box';
+            box.innerHTML = `<div class="id">Worker #${workerId}</div><div class="count">0</div>`;
+            monitor.appendChild(box);
+            workerStats.set(workerId, { element: box, count: 0 });
+            workerCountEl.textContent = workerStats.size;
         }
-    }, 100);
+        const worker = workerStats.get(workerId);
+        worker.count++;
+        worker.element.querySelector('.count').textContent = worker.count;
+        // "闪烁"
+        worker.element.classList.add('active');
+        setTimeout(() => {
+            if (worker.element) {
+                worker.element.classList.remove('active');
+            }
+        }, 100);
+    }
+
 
     // 检查是否完成
-    if (processed === total) {
-        progressText.textContent = `作业完成: ${processed} / ${total}!`;
+    const finishedCount = processed + failed;
+    if (finishedCount === total) {
+        progressText.innerHTML = `
+            作业完成: ${processed} / ${total}!
+            <span class="failed-text">(失败: ${failed})</span>
+        `;
         progressFill.style.background = "#007bff";
         socket.off(`job-progress:${currentJobId}`);
 
         if (duration) {
             const seconds = (duration / 1000).toFixed(2);
             setTimeout(() => {
-                alert(`作业已全部完成！\n总耗时: ${seconds} 秒。`);
+                alert(`作业已全部完成！\n总耗时: ${seconds} 秒。\n成功: ${processed} | 失败: ${failed}`);
             }, 100);
         } else {
-            alert(`作业已全部完成！`);
+            alert(`作业已全部完成！\n成功: ${processed} | 失败: ${failed}`);
         }
     }
 }
@@ -124,6 +140,7 @@ function handleProgressUpdate(payload) {
 // (API 调用)
 startButton.addEventListener('click', async () => {
     const accountsCount = parseInt(document.getElementById('accounts-count').value);
+    const errorRate = parseInt(errorRateInput.value);
     const userId = userIdInput.value; // 从已禁用的输入框获取
 
     // 重置界面
@@ -131,8 +148,9 @@ startButton.addEventListener('click', async () => {
     workerStats.clear();
     workerCountEl.textContent = 0;
     progressFill.style.width = '0%';
+    progressFail.style.width = '0%';
     progressFill.style.background = "#28a745";
-    progressText.textContent = `已启动: 0 / ${accountsCount}`;
+    progressText.innerHTML = `已启动: 0 / ${accountsCount} <span class="failed-text">(失败: 0)</span>`;
     if (currentJobId) {
         socket.off(`job-progress:${currentJobId}`);
     }
@@ -144,7 +162,8 @@ startButton.addEventListener('click', async () => {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 accounts_count: accountsCount,
-                user_id: userId
+                user_id: userId,
+                error_rate: errorRate
             })
         });
         const data = await response.json();

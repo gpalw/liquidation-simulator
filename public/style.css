@@ -1,4 +1,5 @@
-/* style.css */
+/* public/style.css (修复版) */
+
 body {
     font-family: sans-serif;
     margin: 2em;
@@ -18,15 +19,24 @@ h1 {
     color: #333;
 }
 
+/* -- Controls 布局 -- */
 .controls {
     margin-bottom: 1.5em;
-    display: flex;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    /* 一行两列 */
     gap: 1em;
     align-items: flex-end;
 }
 
 .controls div {
     flex: 1;
+}
+
+#start-button {
+    grid-column: 1 / -1;
+    /* 横跨所有列 */
+    margin-top: 1em;
 }
 
 label {
@@ -63,7 +73,7 @@ button:disabled {
     cursor: not-allowed;
 }
 
-/* Google 登录按钮样式 */
+/* -- 登录界面 -- */
 #google-login-btn {
     background: #db4437;
     font-size: 1.2em;
@@ -75,7 +85,6 @@ button:disabled {
     background: #c33b2e;
 }
 
-/* 默认隐藏主应用 */
 #main-app {
     display: none;
 }
@@ -84,6 +93,17 @@ button:disabled {
     text-align: center;
 }
 
+.note {
+    text-align: center;
+    color: #555;
+    background-color: #f8f9fa;
+    border: 1px solid #dee2e6;
+    padding: 0.75em;
+    border-radius: 4px;
+    margin-top: 0;
+}
+
+/* -- 进度条 -- */
 #progress-bar {
     width: 100%;
     background: #e9ecef;
@@ -91,12 +111,19 @@ button:disabled {
     overflow: hidden;
     height: 2em;
     margin-top: 0.5em;
+    display: flex;
 }
 
 #progress-fill {
-    width: 0%;
     height: 100%;
     background: #28a745;
+    transition: width 0.1s ease;
+}
+
+#progress-fail {
+    height: 100%;
+    background: #dc3545;
+    /* 红色 */
     transition: width 0.1s ease;
 }
 
@@ -107,6 +134,12 @@ button:disabled {
     font-size: 1.2em;
 }
 
+.failed-text {
+    color: #dc3545;
+    margin-left: 1em;
+}
+
+/* -- Worker 监控器 -- */
 #worker-monitor {
     margin-top: 2em;
     display: grid;
@@ -140,12 +173,91 @@ button:disabled {
     border-color: #007bff;
 }
 
-.note {
-    text-align: center;
-    color: #555;
-    background-color: #f8f9fa;
-    border: 1px solid #dee2e6;
-    padding: 0.75em;
-    border-radius: 4px;
-    margin-top: 0;
+
+.form-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.label-with-tip {
+    display: inline-flex;
+    /* 文本+问号 同行 */
+    align-items: center;
+    gap: 6px;
+    white-space: nowrap;
+    /* 不换行 */
+    min-width: 140px;
+    /* 你想给标签列的宽度 */
+}
+
+.form-row>input {
+    flex: 1 1 auto;
+    min-width: 0;
+}
+
+.tooltip-container {
+    position: relative;
+    display: inline-flex;
+}
+
+.tooltip-icon {
+    display: inline-flex;
+    justify-content: center;
+    align-items: center;
+    width: 18px;
+    height: 18px;
+    font-size: 12px;
+    font-weight: bold;
+    color: white;
+    background-color: #999;
+    border-radius: 50%;
+    margin-left: 4px;
+    transition: background-color 0.2s;
+}
+
+.tooltip-icon:hover {
+    background-color: #666;
+}
+
+/* Tooltip文字框 */
+.tooltip-text {
+    visibility: hidden;
+    opacity: 0;
+    position: absolute;
+    left: 50%;
+    top: calc(100% + 8px);
+    transform: translateX(-50%);
+    background: rgba(40, 40, 40, 0.95);
+    color: #fff;
+    padding: 10px 12px;
+    border-radius: 6px;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+    font-size: 13px;
+    line-height: 1.5;
+    width: max-content;
+    max-width: 260px;
+    text-align: left;
+    z-index: 999;
+    transition: all 0.25s ease;
+    white-space: normal;
+}
+
+/* 箭头 */
+.tooltip-text::after {
+    content: '';
+    position: absolute;
+    top: -5px;
+    left: 50%;
+    transform: translateX(-50%);
+    border-width: 5px;
+    border-style: solid;
+    border-color: transparent transparent rgba(40, 40, 40, 0.95) transparent;
+}
+
+/* 显示效果 */
+.tooltip-container:hover .tooltip-text {
+    visibility: visible;
+    opacity: 1;
+    top: calc(100% + 12px);
 }
