@@ -13,9 +13,12 @@ const workerCountEl = document.getElementById('worker-count');
 const startButton = document.getElementById('start-button');
 const userIdInput = document.getElementById('user-id');
 const errorRateInput = document.getElementById('error-rate');
+const API_BASE = '/api';           // 相对路径
+const WS_PATH = '/socket.io';     // socket.io 默认路径
 
-// 你的 Nest.js WebSocket 运行在 3001 端口
-const socket = io("http://localhost:3001");
+// --- WebSocket 连接 ---
+const socket = io('/', { path: WS_PATH, withCredentials: true });
+
 
 const workerStats = new Map();
 let currentJobId = null;
@@ -41,11 +44,7 @@ socket.on("disconnect", () => {
 // --- 1. 谷歌登录处理 ---
 googleLoginButton.addEventListener('click', () => {
     // 打开一个弹窗来处理 Google 登录
-    const loginWindow = window.open(
-        "http://localhost:3001/auth/google",
-        "googleLogin",
-        "width=500,height=600"
-    );
+    const loginWindow = window.open(`${API_BASE}/auth/google`, "googleLogin", "width=500,height=600");
 });
 
 // --- 2. 监听来自弹窗的 postMessage ---
@@ -157,7 +156,7 @@ startButton.addEventListener('click', async () => {
 
     try {
         // 调用 API
-        const response = await fetch("http://localhost:3001/liquidation/job", {
+        const response = await fetch(`${API_BASE}/liquidation/job`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
