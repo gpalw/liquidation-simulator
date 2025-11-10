@@ -17,6 +17,7 @@ import { join } from 'path';
     ConfigModule.forRoot({
       isGlobal: true, // 让配置在全局可用
       envFilePath: '.env',
+      expandVariables: true,
     }),
 
     ServeStaticModule.forRoot({

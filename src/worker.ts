@@ -3,7 +3,6 @@
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 import { MicroserviceOptions, Transport } from '@nestjs/microservices';
-import { ConfigService } from '@nestjs/config';
 
 async function bootstrapWorker() {
     // 1. 我们用 AppModule 创建一个“微服务”应用

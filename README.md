@@ -1,98 +1,159 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# 🚀 High-Reliability Batch Liquidation Simulator
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+This is a full-stack, distributed Proof of Concept (PoC) project built to simulate and solve a real-world Fintech architectural challenge: **how to process a massive volume (e.g., 10,000+) of batch liquidation jobs with high concurrency and high reliability.**
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This project is built as a complete microservice system to **visually demonstrate** the scalability, reliability, and resilience of an advanced backend architecture.
 
-## Description
+**➡️ Live Demo:** `https://liquidation.liangwendev.com`
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## ✨ Key Features
+
+* **⚡ Two-Tier Concurrency Architecture:**
+    1.  **Multi-Process Concurrency:** Uses **PM2** to launch multiple Worker processes (e.g., 10+) that are load-balanced using **Kafka Partitions**.
+    2.  **In-Process Concurrency:** Each Worker implements an internal **concurrency pool of 10**, solving the Kafka "uneven partition" bottleneck (where one worker gets 118 tasks) and improving its efficiency by **10x**.
+
+* **📺 Real-Time Visual Dashboard:**
+    * The UI connects via **WebSocket**.
+    * Backend Workers broadcast progress using **Redis Pub/Sub**.
+    * The frontend **dynamically generates** a "Worker Monitor" that **visually contrasts** the "Single Process" mode (one box flashing) against the "Cluster Mode".
+
+* **🛡️ High-Reliability & Resilience:**
+    * **"Zombie Task" Cancellation:** The architecture is **connection-aware**. If the user closes their browser (WebSocket disconnects), the backend **automatically cancels** the in-progress "zombie job" to save resources.
+    * **Failure & Retry Logic:** The UI supports a "Simulated Error Rate". The backend implements an **automatic retry (up to 3 times)** logic for failed tasks and visually reports permanent failures on the "failed" progress bar.
+
+* **🔒 Security & Authentication:**
+    * The entire application is protected by **Google OAuth 2.0** to prevent unauthenticated users from launching malicious jobs (like a 1M-task job) on a public server.
+
+---
+
+## 🛠️ Tech Stack
+
+* **Backend:** Nest.js, Kafka.js, TypeORM, PM2, Passport.js (Google)
+* **Frontend:** HTML5, CSS3, Vanilla JavaScript (ES6+), Socket.IO Client
+* **Infrastructure:** Docker Compose, PostgreSQL, Kafka, Redis
+
+---
+
+## 🔧 Architecture Overview
+
+The application is split by PM2 into two main services:
+
+1.  **`api-gateway` (1 Process):**
+    * Serves **frontend static files** (`index.html`, `app.js`, `style.css`).
+    * Handles **HTTP APIs** (`/auth/google`, `/liquidation/job`).
+    * Manages **WebSocket** connections.
+    * **Subscribes** to Redis progress.
+    * **Publishes** the `job-cancel-topic` message.
+2.  **`liquidation-worker` (N Processes, e.g., 17):**
+    * Does **not** handle HTTP or WebSockets.
+    * **Listens** to Kafka topics: `jobs-topic`, `tasks-topic`, and `job-cancel-topic`.
+    * **Publishes** progress to Redis.
+    * Performs all database operations (`increment`, `update`).
+
+---
+
+## ⚙️ Local Setup & Installation
+
+1.  **Clone the repo**
+    ```bash
+    git clone [YOUR_GITHUB_REPO_URL]
+    cd liquidation-simulator
+    ```
+
+2.  **Install dependencies**
+    ```bash
+    npm install
+    ```
+
+3.  **Setup Google Credentials (Critical)**
+    * Go to [Google Cloud Console](https://console.cloud.google.com/).
+    * Create a new "OAuth 2.0 Client ID".
+    * Under "**Authorized redirect URIs**", you **must** add:
+        `http://localhost:3002/auth/google/callback`
+
+4.  **Create `.env` file**
+    * Create a `.env` file in the project root. Copy the following, and fill in your Google credentials:
+
+    ```env
+    # Database
+    PORT=3002
+    PUBLIC_BASE_URL=http://localhost:${PORT}
+    DB_HOST=localhost
+    DB_PORT=15432 # (We changed this to 15432 during debugging)
+    DB_USERNAME=admin
+    DB_PASSWORD=admin
+    DB_DATABASE=liquidation_db
+
+    # Kafka (Our fixed config)
+    KAFKA_BROKER=localhost:9092
+    
+    # Redis
+    REDIS_HOST=localhost
+    REDIS_PORT=6379
+    
+    # Google Login
+    GOOGLE_CLIENT_ID=PASTE_YOUR_CLIENT_ID_HERE
+    GOOGLE_CLIENT_SECRET=PASTE_YOUR_CLIENT_SECRET_HERE
+    JWT_SECRET=SOME_VERY_RANDOM_SECRET_KEY_FOR_JWT
+    ```
+
+5.  **Configure Kafka Partitions (Critical)**
+    * Check your `ecosystem.config.js` for the `instances` count of the `liquidation-worker` (default is `'max'`).
+    * Check your CPU core count (e.g., 16).
+    * Open `docker-compose.yml` and ensure `KAFKA_NUM_PARTITIONS` matches your `instances` count, otherwise your workers will be idle.
+        ```yaml
+        kafka:
+          # ...
+          environment:
+            # ...
+            KAFKA_NUM_PARTITIONS: 10 # <-- Make sure this matches your CPU cores
+        ```
+
+6.  **Start Infrastructure (Docker)**
+    ```bash
+    docker-compose up -d
+    ```
+
+7.  **Build the Project**
+    ```bash
+    npm run build
+    ```
+
+---
+
+## 🏁 Running the Demo
+
+Use the built-in scripts to demonstrate the two modes.
+
+### Demo A: Single-Process Mode (Slow)
+
+1.  **Start (Single Worker):**
+    ```bash
+    npm run demo:single
+    ```
+    *(This starts 1 `api-gateway` and 1 `liquidation-worker`)*
+
+2.  **Test:**
+    * Open `http://localhost:3001`.
+    * Login and submit a job for 300 accounts.
+    * **Observe:** You will see **only one** "Worker #0" box flashing, and the progress bar will move slowly.
+
+### Demo B: Cluster Mode (Fast)
+
+1.  **Start (Multi-Process):**
+    ```bash
+    npm run demo:cluster
+    ```
+    *(This starts 1 `api-gateway` and N `liquidation-worker`s)*
+
+2.  **Test:**
+    * **Hard-refresh** `http://localhost:3002`.
+    * Login and submit a job for 3000 accounts with an 80% error rate.
+    * **Observe:** You will see **all** worker boxes flashing simultaneously, and the green (success) and red (fail) progress bars will move very quickly.
+
+### Stopping the App
 
 ```bash
-$ npm install
-```
-
-## Compile and run the project
-
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
-```
-
-## Run tests
-
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
-```
-
-## Deployment
-
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
-
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
-
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
-```
-
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
-
-## Resources
-
-Check out a few resources that may come in handy when working with NestJS:
-
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
-
-## Support
-
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
-
-## Stay in touch
-
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
-
-## License
-
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+npm run demo:stop

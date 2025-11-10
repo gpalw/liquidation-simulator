@@ -14,7 +14,7 @@ export class GoogleStrategy extends PassportStrategy(Strategy, 'google') {
             clientID: configService.get<string>('GOOGLE_CLIENT_ID'),
             clientSecret: configService.get<string>('GOOGLE_CLIENT_SECRET'),
             // 2. 这是我们告诉 Google 登录成功后“跳回来”的地址
-            callbackURL: 'http://localhost:3001/auth/google/callback',
+            callbackURL: configService.get<string>('PUBLIC_BASE_URL') + '/auth/google/callback',
             // 3. 我们需要 Google 返回给我们的用户信息
             scope: ['email', 'profile'],
             passReqToCallback: false,
