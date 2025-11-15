@@ -8,6 +8,7 @@ import { JobLog, JobStatus } from './entities/job-log.entity';
 import { TaskLog, TaskStatus } from './entities/task-log.entity';
 import { Redis } from 'ioredis';
 import { REDIS_CLIENT } from '../redis/redis.module';
+import { ConfigService } from '@nestjs/config';
 
 type TaskMessage = { taskId: string; jobId: string; accountId: string, errorRate?: number };
 
@@ -17,7 +18,8 @@ export class LiquidationService {
     [x: string]: any;
     private readonly logger = new Logger(LiquidationService.name);
 
-    private readonly CONCURRENCY_LIMIT = 10;
+    private CONCURRENCY_LIMIT: number;
+    private TICK_RATE_MS: number;
     private taskQueue: TaskMessage[] = [];
     private activeTasksCount = 0;
     private taskInterval: NodeJS.Timeout;
@@ -36,13 +38,17 @@ export class LiquidationService {
         private readonly entityManager: EntityManager,
 
         @Inject(REDIS_CLIENT) private readonly redisClient: Redis,
+
+        private readonly configService: ConfigService,
     ) {
+        this.CONCURRENCY_LIMIT = this.configService.get<number>('WORKER_CONCURRENCY', 10);
+        this.TICK_RATE_MS = this.configService.get<number>('WORKER_TICK_RATE_MS', 100);
     }
 
     onModuleInit() {
         this.logger.log('[并发引擎] 启动任务处理循环...');
-        // 每 100 毫秒“唤醒”一次，去检查队列
-        this.taskInterval = setInterval(() => this._processTaskQueue(), 100);
+        // 每 TICK_RATE_MS 毫秒“唤醒”一次，去检查队列
+        this.taskInterval = setInterval(() => this._processTaskQueue(), this.TICK_RATE_MS);
     }
 
     onModuleDestroy() {

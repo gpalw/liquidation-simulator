@@ -35,7 +35,7 @@ import { join } from 'path';
       entities: [JobLog, TaskLog],
       synchronize: true,
       extra: {
-        max: 5
+        max: Number(process.env.DB_POOL_MAX)
       }
     }),
 
