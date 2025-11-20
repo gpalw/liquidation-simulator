@@ -1,4 +1,4 @@
-/* public/style.css (修复版) */
+/* public/style.css (fixed version) */
 
 body {
     font-family: sans-serif;
@@ -19,12 +19,12 @@ h1 {
     color: #333;
 }
 
-/* -- Controls 布局 -- */
+/* -- Controls layout -- */
 .controls {
     margin-bottom: 1.5em;
     display: grid;
     grid-template-columns: 1fr 1fr;
-    /* 一行两列 */
+    /* two columns per row */
     gap: 1em;
     align-items: flex-end;
 }
@@ -35,7 +35,7 @@ h1 {
 
 #start-button {
     grid-column: 1 / -1;
-    /* 横跨所有列 */
+    /* span all columns */
     margin-top: 1em;
 }
 
@@ -73,7 +73,7 @@ button:disabled {
     cursor: not-allowed;
 }
 
-/* -- 登录界面 -- */
+/* -- Login screen -- */
 #google-login-btn {
     background: #db4437;
     font-size: 1.2em;
@@ -103,7 +103,7 @@ button:disabled {
     margin-top: 0;
 }
 
-/* -- 进度条 -- */
+/* -- Progress bar -- */
 #progress-bar {
     width: 100%;
     background: #e9ecef;
@@ -123,7 +123,7 @@ button:disabled {
 #progress-fail {
     height: 100%;
     background: #dc3545;
-    /* 红色 */
+    /* red */
     transition: width 0.1s ease;
 }
 
@@ -139,7 +139,7 @@ button:disabled {
     margin-left: 1em;
 }
 
-/* -- Worker 监控器 -- */
+/* -- Worker monitor -- */
 #worker-monitor {
     margin-top: 2em;
     display: grid;
@@ -173,7 +173,6 @@ button:disabled {
     border-color: #007bff;
 }
 
-
 .form-row {
     display: flex;
     align-items: center;
@@ -182,13 +181,13 @@ button:disabled {
 
 .label-with-tip {
     display: inline-flex;
-    /* 文本+问号 同行 */
+    /* label text + ? in one line */
     align-items: center;
     gap: 6px;
     white-space: nowrap;
-    /* 不换行 */
+    /* no wrap */
     min-width: 140px;
-    /* 你想给标签列的宽度 */
+    /* width for label column */
 }
 
 .form-row>input {
@@ -220,7 +219,7 @@ button:disabled {
     background-color: #666;
 }
 
-/* Tooltip文字框 */
+/* Tooltip text box */
 .tooltip-text {
     visibility: hidden;
     opacity: 0;
@@ -243,7 +242,7 @@ button:disabled {
     white-space: normal;
 }
 
-/* 箭头 */
+/* Tooltip arrow */
 .tooltip-text::after {
     content: '';
     position: absolute;
@@ -255,7 +254,7 @@ button:disabled {
     border-color: transparent transparent rgba(40, 40, 40, 0.95) transparent;
 }
 
-/* 显示效果 */
+/* Tooltip visible on hover */
 .tooltip-container:hover .tooltip-text {
     visibility: visible;
     opacity: 1;

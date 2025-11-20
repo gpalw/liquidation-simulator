@@ -1,6 +1,6 @@
 // app.js
 
-// --- DOM 元素 ---
+// --- DOM Elements ---
 const loginScreen = document.getElementById('login-screen');
 const mainApp = document.getElementById('main-app');
 const googleLoginButton = document.getElementById('google-login-btn');
@@ -13,71 +13,73 @@ const workerCountEl = document.getElementById('worker-count');
 const startButton = document.getElementById('start-button');
 const userIdInput = document.getElementById('user-id');
 const errorRateInput = document.getElementById('error-rate');
-const API_BASE = '/api';           // 相对路径
-const WS_PATH = '/socket.io';     // socket.io 默认路径
 
-// --- WebSocket 连接 ---
+const API_BASE = '/api';           // Relative path
+const WS_PATH = '/socket.io';      // Default socket.io path
+
+// --- WebSocket Connection ---
 const socket = io('/', { path: WS_PATH, withCredentials: true });
-
 
 const workerStats = new Map();
 let currentJobId = null;
-let authenticatedUser = null; // 存储已认证的用户信息
+let authenticatedUser = null; // Store authenticated user info
 
-// --- WebSocket 连接状态 ---
+// --- WebSocket Connection State ---
 socket.on("connect", () => {
-    console.log("已成功连接到 WebSocket 服务器!");
-    // 如果已经登录了，才启用按钮
+    console.log("Successfully connected to WebSocket server!");
+
+    // Enable button only after login
     if (authenticatedUser) {
         startButton.disabled = false;
-        startButton.textContent = "开始清算";
-        progressText.textContent = "连接成功！等待作业启动...";
+        startButton.textContent = "Start Simulation";
+        progressText.textContent = "Connected! Waiting for job to start...";
     }
 });
+
 socket.on("disconnect", () => {
-    console.log("已与 WebSocket 断开连接。");
+    console.log("Disconnected from WebSocket server.");
     startButton.disabled = true;
-    startButton.textContent = "已断开";
-    progressText.textContent = "连接已断开。请刷新页面。";
+    startButton.textContent = "Disconnected";
+    progressText.textContent = "Connection lost. Please refresh the page.";
 });
 
-// --- 1. 谷歌登录处理 ---
+// --- 1. Google Login Handler ---
 googleLoginButton.addEventListener('click', () => {
-    // 打开一个弹窗来处理 Google 登录
+    // Open login popup
     const loginWindow = window.open(`${API_BASE}/auth/google`, "googleLogin", "width=500,height=600");
 });
 
-// --- 2. 监听来自弹窗的 postMessage ---
+// --- 2. Listen for postMessage from popup ---
 window.addEventListener("message", (event) => {
-    // 安全检查：(我们暂时跳过 event.origin 的严格检查)
+    // (Skipping strict event.origin check for now)
 
     if (event.data && event.data.email) {
-        console.log("收到用户信息:", event.data);
+        console.log("Received user info:", event.data);
         authenticatedUser = event.data;
 
-        // 2a. 隐藏登录界面
+        // 2a. Hide login screen
         loginScreen.style.display = 'none';
 
-        // 2b. 显示主应用
+        // 2b. Show main app
         mainApp.style.display = 'block';
 
-        // 2c. 填充并禁用 用户ID 输入框
+        // 2c. Fill and disable User ID input
         userIdInput.value = authenticatedUser.email;
         userIdInput.disabled = true;
 
-        // 2d. (如果 WebSocket 已连接) 启用“开始”按钮
+        // 2d. If WebSocket connected → enable start button
         if (socket.connected) {
             startButton.disabled = false;
-            startButton.textContent = "开始清算";
-            progressText.textContent = "连接成功！等待作业启动...";
+            startButton.textContent = "Start Simulation";
+            progressText.textContent = "Connected! Waiting for job to start...";
         }
     }
 }, false);
 
 
-// --- 3. 核心功能 ---
+// --- 3. Core Functionality ---
 
-// (处理进度更新)
+// Handle progress updates
 function handleProgressUpdate(payload) {
     const { processed, failed = 0, total, workerId, duration } = payload;
 
@@ -88,11 +90,11 @@ function handleProgressUpdate(payload) {
     progressFail.style.width = failPercentage + '%';
 
     progressText.innerHTML = `
-        处理中: ${processed} / ${total}
-        <span class="failed-text">(失败: ${failed})</span>
+        Processing: ${processed} / ${total}
+        <span class="failed-text">(Failed: ${failed})</span>
     `;
 
-    // 更新 Worker 监控器 (自动发现)
+    // Update Worker Monitor (auto discovery)
     if (workerId !== undefined) {
         if (!workerStats.has(workerId)) {
             const box = document.createElement('div');
@@ -105,7 +107,8 @@ function handleProgressUpdate(payload) {
         const worker = workerStats.get(workerId);
         worker.count++;
         worker.element.querySelector('.count').textContent = worker.count;
-        // "闪烁"
+
+        // Flash effect
         worker.element.classList.add('active');
         setTimeout(() => {
             if (worker.element) {
@@ -114,13 +117,12 @@ function handleProgressUpdate(payload) {
         }, 100);
     }
 
-
-    // 检查是否完成
+    // Check if completed
     const finishedCount = processed + failed;
     if (finishedCount === total) {
         progressText.innerHTML = `
-            作业完成: ${processed} / ${total}!
-            <span class="failed-text">(失败: ${failed})</span>
+            Job Completed: ${processed} / ${total}!
+            <span class="failed-text">(Failed: ${failed})</span>
         `;
         progressFill.style.background = "#007bff";
         socket.off(`job-progress:${currentJobId}`);
@@ -128,34 +130,35 @@ function handleProgressUpdate(payload) {
         if (duration) {
             const seconds = (duration / 1000).toFixed(2);
             setTimeout(() => {
-                alert(`作业已全部完成！\n总耗时: ${seconds} 秒。\n成功: ${processed} | 失败: ${failed}`);
+                alert(`All tasks are completed!\nTotal Duration: ${seconds} seconds.\nSuccess: ${processed} | Failed: ${failed}`);
             }, 100);
         } else {
-            alert(`作业已全部完成！\n成功: ${processed} | 失败: ${failed}`);
+            alert(`All tasks are completed!\nSuccess: ${processed} | Failed: ${failed}`);
         }
     }
 }
 
-// (API 调用)
+// API Call
 startButton.addEventListener('click', async () => {
     const accountsCount = parseInt(document.getElementById('accounts-count').value);
     const errorRate = parseInt(errorRateInput.value);
-    const userId = userIdInput.value; // 从已禁用的输入框获取
+    const userId = userIdInput.value;
 
-    // 重置界面
+    // Reset UI
     monitor.innerHTML = '';
     workerStats.clear();
     workerCountEl.textContent = 0;
     progressFill.style.width = '0%';
     progressFail.style.width = '0%';
     progressFill.style.background = "#28a745";
-    progressText.innerHTML = `已启动: 0 / ${accountsCount} <span class="failed-text">(失败: 0)</span>`;
+    progressText.innerHTML = `Started: 0 / ${accountsCount} <span class="failed-text">(Failed: 0)</span>`;
+
     if (currentJobId) {
         socket.off(`job-progress:${currentJobId}`);
     }
 
     try {
-        // 调用 API
+        // Call API
         const response = await fetch(`${API_BASE}/liquidation/job`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -165,19 +168,20 @@ startButton.addEventListener('click', async () => {
                 error_rate: errorRate
             })
         });
+
         const data = await response.json();
-        if (!response.ok) throw new Error(data.message || 'API 请求失败');
+        if (!response.ok) throw new Error(data.message || 'API request failed');
 
         currentJobId = data.jobId;
-        console.log(`正在监听 Redis 频道: job-progress:${currentJobId}`);
+        console.log(`Listening on Redis channel: job-progress:${currentJobId}`);
 
-        // 认领任务 (用于“僵尸”修复)
+        // Subscribe to job (zombie worker recovery)
         socket.emit('subscribeToJob', { jobId: currentJobId });
 
-        // 监听 WebSocket 广播
+        // Listen to WebSocket broadcasts
         socket.on(`job-progress:${currentJobId}`, handleProgressUpdate);
 
     } catch (error) {
-        progressText.textContent = `启动失败: ${error.message}`;
+        progressText.textContent = `Failed to start: ${error.message}`;
     }
 });
